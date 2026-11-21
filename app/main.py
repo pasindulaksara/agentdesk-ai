@@ -1,6 +1,10 @@
 
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
+
+from app.agents.agent import run_agent
+
 
 app = FastAPI(
     title="AgentDesk AI",
@@ -10,7 +14,7 @@ app = FastAPI(
 
 
 class TaskRequest(BaseModel):
-    task: str
+    task: str = Field(min_length=1)
 
 
 @app.get("/")
@@ -18,7 +22,7 @@ def home():
     return {
         "project": "AgentDesk AI",
         "status": "running",
-        "message": "Your AI Agent platform is ready!"
+        "message": "AI Agent is ready!"
     }
 
 
@@ -28,9 +32,14 @@ def health():
 
 
 @app.post("/api/agent/run")
-def run_agent(request: TaskRequest):
-    return {
-        "task": request.task,
-        "status": "received",
-        "message": "Agent execution will be connected next."
-    }
+async def execute_agent(request: TaskRequest):
+    try:
+        result = await run_in_threadpool(run_agent, request.task)
+        return result
+
+    except Exception as error:
+        print(f"Agent error: {error}")
+        raise HTTPException(
+            status_code=500,
+            detail="Agent execution failed"
+        )
