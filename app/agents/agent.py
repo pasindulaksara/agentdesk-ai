@@ -5,11 +5,13 @@ from datetime import datetime
 
 from ollama import chat
 
-from app.tools.task_tools import (
-    create_task,
-    list_tasks,
-    update_task,
+from app.tools.task_tools import create_task, list_tasks, update_task
+from app.services.workflow import (
+    get_priority_tasks,
+    generate_daily_plan,
+    start_high_priority_tasks,
 )
+from app.services.memory import get_history, save_message
 
 
 MODEL = "qwen3:1.7b"
@@ -49,42 +51,47 @@ AVAILABLE_TOOLS = {
     "create_task": create_task,
     "list_tasks": list_tasks,
     "update_task": update_task,
+    "get_priority_tasks": get_priority_tasks,
+    "generate_daily_plan": generate_daily_plan,
+    "start_high_priority_tasks": start_high_priority_tasks,
 }
 
 
-def run_agent(task: str) -> dict:
+def run_agent(task: str, session_id: str = "default") -> dict:
     started_at = time.perf_counter()
     tool_history = []
+
+    history = get_history(session_id)
 
     messages = [
         {
             "role": "system",
             "content": (
-                "You are AgentDesk AI, a task management assistant. "
+                "You are AgentDesk AI, an AI task management "
+                "and workflow automation assistant. "
+                "Use conversation history to understand follow-up requests. "
                 "Use tools to create, list, and update tasks. "
-                "Use get_current_time when you need today's date. "
-                "Due dates must be YYYY-MM-DD. "
-                "Never claim a task was saved unless the tool confirms it. "
-                "Do not invent tool results. "
-                "Keep answers short."
+                "Use get_priority_tasks for important tasks. "
+                "Use generate_daily_plan for daily plans. "
+                "Use start_high_priority_tasks only when explicitly requested. "
+                "Never change task statuses without permission. "
+                "Use get_current_time for today's date. "
+                "Due dates must use YYYY-MM-DD. "
+                "Never invent task details or tool results. "
+                "Keep responses concise."
             ),
         },
+        *history,
         {"role": "user", "content": task},
     ]
 
     for step in range(MAX_STEPS):
-        print(f"[AGENT] Step {step + 1}", flush=True)
+        print(f"[AGENT] Session: {session_id} | Step {step + 1}", flush=True)
 
         response = chat(
             model=MODEL,
             messages=messages,
-            tools=[
-                get_current_time,
-                calculate,
-                create_task,
-                list_tasks,
-                update_task,
-            ],
+            tools=list(AVAILABLE_TOOLS.values()),
             think=False,
             options={
                 "temperature": 0,
@@ -96,9 +103,15 @@ def run_agent(task: str) -> dict:
         tool_calls = response.message.tool_calls or []
 
         if not tool_calls:
+            answer = response.message.content or ""
+
+            save_message(session_id, "user", task)
+            save_message(session_id, "assistant", answer)
+
             return {
+                "session_id": session_id,
                 "task": task,
-                "answer": response.message.content or "",
+                "answer": answer,
                 "tools_used": tool_history,
                 "steps": step + 1,
                 "execution_time_seconds": round(
@@ -133,9 +146,15 @@ def run_agent(task: str) -> dict:
                 "content": json.dumps(result),
             })
 
+    answer = "Agent reached maximum execution steps."
+
+    save_message(session_id, "user", task)
+    save_message(session_id, "assistant", answer)
+
     return {
+        "session_id": session_id,
         "task": task,
-        "answer": "Agent reached maximum steps.",
+        "answer": answer,
         "tools_used": tool_history,
         "steps": MAX_STEPS,
         "execution_time_seconds": round(

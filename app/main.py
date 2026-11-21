@@ -15,6 +15,11 @@ app = FastAPI(
 
 class TaskRequest(BaseModel):
     task: str = Field(min_length=1)
+    session_id: str = Field(
+        default="default",
+        min_length=1,
+        max_length=100,
+    )
 
 
 @app.get("/")
@@ -22,7 +27,6 @@ def home():
     return {
         "project": "AgentDesk AI",
         "status": "running",
-        "message": "AI Agent is ready!"
     }
 
 
@@ -34,12 +38,15 @@ def health():
 @app.post("/api/agent/run")
 async def execute_agent(request: TaskRequest):
     try:
-        result = await run_in_threadpool(run_agent, request.task)
-        return result
+        return await run_in_threadpool(
+            run_agent,
+            request.task,
+            request.session_id,
+        )
 
     except Exception as error:
-        print(f"Agent error: {error}")
+        print(f"Agent error: {error}", flush=True)
         raise HTTPException(
             status_code=500,
-            detail="Agent execution failed"
+            detail="Agent execution failed",
         )
